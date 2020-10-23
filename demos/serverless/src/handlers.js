@@ -3,7 +3,7 @@
 
 const AWS = require('./aws-sdk');
 const fs = require('fs');
-const { v4: uuidv4 } = require('./uuid');
+const {v4: uuidv4} = require('./uuid');
 
 // Store meetings in a DynamoDB table so attendees can join by meeting title
 const ddb = new AWS.DynamoDB();
@@ -11,10 +11,10 @@ const ddb = new AWS.DynamoDB();
 // Create an AWS SDK Chime object. Region 'us-east-1' is currently required.
 // Use the MediaRegion property below in CreateMeeting to select the region
 // the meeting is hosted in.
-const chime = new AWS.Chime({ region: 'us-east-1' });
+const chime = new AWS.Chime({region: 'us-east-1'});
 
 // Set the AWS SDK Chime endpoint. The global endpoint is https://service.chime.aws.amazon.com.
-chime.endpoint = new AWS.Endpoint(process.env.CHIME_ENDPOINT);
+chime.endpoint = new AWS.Endpoint('https://service.chime.aws.amazon.com');
 
 // Read resource names from the environment
 const meetingsTableName = process.env.MEETINGS_TABLE_NAME;
@@ -34,7 +34,7 @@ exports.indexV2 = async (event, context, callback) => {
   return response(200, 'text/html', fs.readFileSync('./indexV2.html', {encoding: 'utf8'}));
 };
 
-exports.join = async(event, context) => {
+exports.join = async (event, context) => {
   const query = event.queryStringParameters;
   if (!query.title || !query.name || !query.region) {
     return response(400, 'application/json', JSON.stringify({error: 'Need parameters: title, name, region'}));
@@ -53,16 +53,11 @@ exports.join = async(event, context) => {
       MediaRegion: query.region,
 
       // Set up SQS notifications if being used
-      NotificationsConfiguration: useSqsInsteadOfEventBridge ? { SqsQueueArn: sqsQueueArn } : {},
+      NotificationsConfiguration: useSqsInsteadOfEventBridge ? {SqsQueueArn: sqsQueueArn} : {},
 
       // Any meeting ID you wish to associate with the meeting.
       // For simplicity here, we use the meeting title.
       ExternalMeetingId: query.title.substring(0, 64),
-
-      // Tags associated with the meeting. They can be used in cost allocation console
-      Tags: [
-        { Key: 'Department', Value: 'RND'}
-      ]
     };
     console.info('Creating new meeting: ' + JSON.stringify(request));
     meeting = await chime.createMeeting(request).promise();
@@ -99,9 +94,83 @@ exports.end = async (event, context) => {
   const meeting = await getMeeting(event.queryStringParameters.title);
 
   // End the meeting. All attendee connections will hang up.
-  await chime.deleteMeeting({ MeetingId: meeting.Meeting.MeetingId }).promise();
+  await chime.deleteMeeting({MeetingId: meeting.Meeting.MeetingId}).promise();
   return response(200, 'application/json', JSON.stringify({}));
 };
+
+// exports.logs = async (event, context) => {
+//   const body = JSON.parse(event.body);
+//   if (!body.logs || !body.meetingId || !body.attendeeId || !body.appName) {
+//     console.log('aaaaa ');
+//     return response(400, 'application/json', JSON.stringify({error: 'Need properties: logs, meetingId, attendeeId, appName'}));
+//   } else if (!body.logs.length) {
+//     console.log('bbbb ');
+//
+//     return response(200, 'application/json', JSON.stringify({}));
+//   }
+//   console.log('cccc ');
+//
+//   const logStreamName = `ChimeSDKMeeting_${body.meetingId.toString()}_${body.attendeeId.toString()}`;
+//   const cloudWatchClient = new AWS.CloudWatchLogs({apiVersion: '2014-03-28'});
+//   const putLogEventsInput = {
+//     logGroupName: logGroupName,
+//     logStreamName: logStreamName
+//   };
+//   const uploadSequence = await ensureLogStream(cloudWatchClient, logStreamName);
+//   if (uploadSequence) {
+//     putLogEventsInput.sequenceToken = uploadSequence;
+//   }
+//   const logEvents = [];
+//   for (let i = 0; i < body.logs.length; i++) {
+//
+//     const log = body.logs[i];
+//     // console.log(' log : ', typeof log , log);
+//     // console.log(' logMessage : ', typeof log.message , log.message);
+//     // console.log(' logMessage True/False: ', typeof log.message === 'object');
+//     // console.log('dddd ', log.message);
+//     //
+//     // if (isJsonString(log.message)) {
+//     //   const logMsg = JSON.parse(log.message);
+//     //   console.log(typeof logMsg, ' logMsg 000 ', logMsg);
+//     //   if ((logMsg.audioPacketsReceived && logMsg.audioPacketsReceived !== null)) {
+//     //
+//     //     try {
+//     //       console.log('logMsg 1111 ', logMsg);
+//     //       //await putMetricData(logMsg, body.meetingId, body.attendeeId);
+//     //       console.log('logMsg 2222 ', logMsg);
+//     //
+//     //     } catch (ex) {
+//     //       console.error('logMsg 3333 ', ex);
+//     //     }
+//     //   } else if((logMsg.meetingJoin && logMsg.meetingJoin !== null) || (logMsg.meetingLeave && logMsg.meetingLeave !== null) || (logMsg.alivePing && logMsg.alivePing !== null)) {
+//     //     try {
+//     //       console.log('logMsg 444 ', logMsg);
+//     //       //await putMeetingStatusMetricData(logMsg);
+//     //       console.log('logMsg 5555 ', logMsg);
+//     //
+//     //     } catch (ex) {
+//     //       console.error('logMsg 666 ', ex);
+//     //     }
+//     //   }
+//     //
+//     // }
+//     const timestamp = new Date(log.timestampMs).toISOString();
+//     const message = `${timestamp} [${log.sequenceNumber}] [${log.logLevel}] [meeting: ${body.meetingId.toString()}] [attendee: ${body.attendeeId}]: ${log.message}`;
+//     logEvents.push({
+//       message: message,
+//       timestamp: log.timestampMs
+//     });
+//
+//     putLogEventsInput.logEvents = logEvents;
+//     try {
+//       await cloudWatchClient.putLogEvents(putLogEventsInput).promise();
+//     } catch (error) {
+//       console.error(`Failed to put CloudWatch log events with error ${error.message} and params ${JSON.stringify(putLogEventsInput)}`);
+//     }
+//     return response(200, 'application/json', JSON.stringify({}));
+//   }
+// };
+
 
 exports.logs = async (event, context) => {
   const body = JSON.parse(event.body);
@@ -112,7 +181,7 @@ exports.logs = async (event, context) => {
   }
 
   const logStreamName = `ChimeSDKMeeting_${body.meetingId.toString()}_${body.attendeeId.toString()}`;
-  const cloudWatchClient = new AWS.CloudWatchLogs({ apiVersion: '2014-03-28' });
+  const cloudWatchClient = new AWS.CloudWatchLogs({apiVersion: '2014-03-28'});
   const putLogEventsInput = {
     logGroupName: logGroupName,
     logStreamName: logStreamName
@@ -122,8 +191,44 @@ exports.logs = async (event, context) => {
     putLogEventsInput.sequenceToken = uploadSequence;
   }
   const logEvents = [];
+  let metricData = [];
+
   for (let i = 0; i < body.logs.length; i++) {
     const log = body.logs[i];
+    console.log(' log : ', typeof log, log);
+    console.log(' logMessage : ', typeof log.message, log.message);
+    console.log(' logMessage True/False: ', typeof log.message === 'object');
+    console.log('dddd ', log.message);
+
+    if (isJsonString(log.message)) {
+      const logMsg = JSON.parse(log.message);
+      console.log(typeof logMsg, ' logMsg 000 ', logMsg);
+      console.log(logMsg.audioPacketsReceived, typeof logMsg.audioPacketsReceived);
+      console.log(logMsg.audioPacketsReceived !== null);
+      if ((logMsg.audioPacketsReceived && logMsg.audioPacketsReceived !== null)) {
+
+        try {
+          console.log('logMsg 1111 ', logMsg);
+          const metricDataLocal = await putMetricData(logMsg, body.meetingId, body.attendeeId);
+          for (let data = 0; data < metricDataLocal.length; data += 1) {
+            metricData.push(metricDataLocal[data]);
+          }
+          console.log('logMsg 2222 ', logMsg);
+
+        } catch (ex) {
+          console.error('logMsg 3333 ', ex);
+        }
+      } else if ((logMsg.meetingJoin && logMsg.meetingJoin !== null) || (logMsg.meetingLeave && logMsg.meetingLeave !== null) || (logMsg.alivePing && logMsg.alivePing !== null)) {
+        try {
+          console.log('logMsg 444 ', logMsg);
+          metricData.push(await putMeetingStatusMetricData(logMsg));
+          console.log('logMsg 5555 ', logMsg);
+        } catch (ex) {
+          console.error('logMsg 666 ', ex);
+        }
+      }
+    }
+
     const timestamp = new Date(log.timestampMs).toISOString();
     const message = `${timestamp} [${log.sequenceNumber}] [${log.logLevel}] [meeting: ${body.meetingId.toString()}] [attendee: ${body.attendeeId}]: ${log.message}`;
     logEvents.push({
@@ -132,7 +237,19 @@ exports.logs = async (event, context) => {
     });
   }
   putLogEventsInput.logEvents = logEvents;
+
   try {
+    const namespace = 'CustomLT1';
+    var params = {
+      MetricData: metricData,
+      Namespace: namespace
+    };
+    console.log('try block', metricData);
+    if (metricData.length > 0) {
+      console.log('metric Data0000 ' + metricData.length);
+      console.log(metricData);
+      await publishMetricToCloudWatch(params);
+    }
     await cloudWatchClient.putLogEvents(putLogEventsInput).promise();
   } catch (error) {
     const errorMessage = `Failed to put CloudWatch log events with error ${error} and params ${JSON.stringify(putLogEventsInput)}`;
@@ -144,6 +261,21 @@ exports.logs = async (event, context) => {
   }
   return response(200, 'application/json', JSON.stringify({}));
 };
+
+
+exports.create_log_stream = async (event, context, callback) => {
+  const body = JSON.parse(event.body);
+  if (!body.meetingId || !body.attendeeId) {
+    return response(400, 'application/json', JSON.stringify({error: 'Need properties: meetingId, attendeeId'}));
+  }
+  const logStreamName = `ChimeSDKMeeting_${body.meetingId.toString()}_${body.attendeeId.toString()}`;
+  const cloudWatchClient = new AWS.CloudWatchLogs({apiVersion: '2014-03-28'});
+  await cloudWatchClient.createLogStream({
+    logGroupName: logGroupName,
+    logStreamName: logStreamName,
+  }).promise();
+  return response(200, 'application/json', JSON.stringify({}));
+}
 
 // Called when SQS receives records of meeting events and logs out those records
 exports.sqs_handler = async (event, context, callback) => {
@@ -158,6 +290,104 @@ exports.event_bridge_handler = async (event, context, callback) => {
 }
 
 // === Helpers ===
+
+function isJsonString(str) {
+  try {
+    if (str === null) {
+      return false;
+    }
+    const json = JSON.parse(str);
+    return (typeof json === 'object');
+  } catch (e) {
+    return false;
+  }
+}
+
+
+async function putMeetingStatusMetricData(logMsg) {
+  const instanceId = String(logMsg.instanceId);
+  let metric_name = '';
+  if (logMsg.meetingJoin)
+    metric_name = 'meetingJoin';
+  else if (logMsg.meetingLeave)
+    metric_name = 'meetingLeave';
+  else if (logMsg.alivePing)
+    metric_name = 'alivePing';
+  const metric_value = logMsg[metric_name];
+  //console.log(`Emitting metric: ${namespace} / ${metric_name} : ` + 1);
+  return {
+    MetricName: metric_name,
+    Dimensions: [{
+      Name: 'Instance',
+      Value: instanceId
+    }],
+    Unit: 'None',
+    Value: metric_value
+  };
+}
+
+
+async function putMetricData(logMsg, meetingId, attendeeId) {
+  const instanceId = logMsg.instanceId;
+  const loadTestStartTime = logMsg.loadTestStartTime;
+  console.log('instanceId... ' + instanceId);
+  console.log('loadTestStartTime... ' + loadTestStartTime);
+  console.log('loadMsg... ' + logMsg);
+  delete logMsg.instanceId;
+  delete logMsg.loadTestStartTime;
+
+  const dimensions = [
+    {
+      Name: 'MeetingId',
+      Value: meetingId
+    },
+    {
+      Name: 'AttendeeId',
+      Value: attendeeId
+    },
+    {
+      Name: 'Instance',
+      Value: instanceId
+    },
+    {
+      Name: 'LoadTestStartTime',
+      Value: loadTestStartTime.toLocaleString()
+    }
+  ];
+
+  //console.log(`Emitting metric: ${namespace} / meetingActive : ` + 1);
+  delete logMsg.availableSendBandwidth;
+  let metricData = [];
+  for (const [metric_name, metric_value] of Object.entries(logMsg)) {
+    console.log(`Emitting metric: ${metric_name} : ` + metric_value);
+    metricData.push({
+      MetricName: metric_name,
+      Dimensions: dimensions,
+      Unit: 'None',
+      Value: metric_value
+    });
+  }
+  return metricData;
+
+}
+
+async function publishMetricToCloudWatch(params) {
+  try {
+    var cloudWatch = new AWS.CloudWatch({
+      apiVersion: '2010-08-01'
+    });
+    console.log(params);
+    let res = null;
+    res = await cloudWatch.putMetricData(params).promise();
+    if (res !== null) {
+      console.log('successful ', res);
+    } else {
+      console.log('failed ', res);
+    }
+  } catch (error) {
+    console.error(`Unable to emit metric: ${error}`)
+  }
+}
 
 // Retrieves the meeting from the table by the meeting title
 async function getMeeting(title) {
@@ -177,8 +407,8 @@ async function putMeeting(title, meeting) {
   await ddb.putItem({
     TableName: meetingsTableName,
     Item: {
-      'Title': { S: title },
-      'Data': { S: JSON.stringify(meeting) },
+      'Title': {S: title},
+      'Data': {S: JSON.stringify(meeting)},
       'TTL': {
         N: `${Math.floor(Date.now() / 1000) + 60 * 60 * 24}` // clean up meeting record one day from now
       }
@@ -203,24 +433,10 @@ async function ensureLogStream(cloudWatchClient, logStreamName) {
   return null;
 }
 
-exports.create_log_stream = async (event, context, callback) => {
-  const body = JSON.parse(event.body);
-  if (!body.meetingId || !body.attendeeId) {
-    return response(400, 'application/json', JSON.stringify({error: 'Need properties: meetingId, attendeeId'}));
-  }
-  const logStreamName = `ChimeSDKMeeting_${body.meetingId.toString()}_${body.attendeeId.toString()}`;
-  const cloudWatchClient = new AWS.CloudWatchLogs({ apiVersion: '2014-03-28' });
-  await cloudWatchClient.createLogStream({
-    logGroupName: logGroupName,
-    logStreamName: logStreamName,
-  }).promise();
-  return response(200, 'application/json', JSON.stringify({}));
-}
-
 function response(statusCode, contentType, body) {
   return {
     statusCode: statusCode,
-    headers: { 'Content-Type': contentType },
+    headers: {'Content-Type': contentType},
     body: body,
     isBase64Encoded: false
   };
